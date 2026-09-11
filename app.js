@@ -1,5 +1,6 @@
-import {Round,TapInput,ResultGuard,isLevelUnlocked} from './rules.js?v=20260912-4';
-import {Feedback,BackgroundMusic} from './feedback.js?v=20260912-4';
+import {installUpdater} from './updater.js?v=20260912-5';
+import {Round,TapInput,ResultGuard,isLevelUnlocked} from './rules.js?v=20260912-5';
+import {Feedback,BackgroundMusic} from './feedback.js?v=20260912-5';
 const $=s=>document.querySelector(s),board=$('#board');
 // Fixed categorical palette: blue, green, yellow, orange, red, pink,
 // violet, navy, cyan, brown, gray, magenta. Avoid multiple similar greens.
@@ -123,7 +124,8 @@ function prepareCharacter(){return new Promise((resolve,reject)=>{
   function finish(error){clearTimeout(timeout);character.onload=character.onerror=null;error?reject(error):resolve();}
   character.onload=()=>{if(character.decode)character.decode().then(()=>finish(),finish);else finish();};
   character.onerror=()=>finish(Error('character load'));
-  character.src='./feiwan.webp?v=20260912-4';
+  character.src='./feiwan.webp?v=20260912-5';
 });}
-async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-4',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
+async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-5',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
 $('#retry').addEventListener('click',load);load();
+installUpdater();
