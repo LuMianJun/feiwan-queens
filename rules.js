@@ -1,3 +1,9 @@
+export function isLevelUnlocked(levels,complete,index){
+  if(!Number.isInteger(index)||index<0||index>=levels.length)return false;
+  if(complete.has(levels[index].id))return true; // Preserve previously earned replay access.
+  const firstIncomplete=levels.findIndex(level=>!complete.has(level.id));
+  return firstIncomplete===-1||index<=firstIncomplete;
+}
 export function analyze(level,cells){
   const n=level.size,stars=[];cells.forEach((v,i)=>{if(v===1)stars.push(i);});const conflicts=new Set();
   for(let a=0;a<stars.length;a++)for(let b=a+1;b<stars.length;b++){
@@ -15,13 +21,16 @@ export function editCell(cells,index,tool,toggle=true){
 }
 // 0 empty, 1 confirmed Feiwan, 2 cross, 3 locked error.
 export class Round {
-  constructor(level){this.level=level;this.cells=Array(level.size**2).fill(0);this.lives=2;this.state='playing';}
+  constructor(level,now=()=>Date.now()){this.level=level;this.cells=Array(level.size**2).fill(0);this.lives=2;this.state='playing';this.now=now;this.timeLimitSeconds=level.timeLimitSeconds??0;this.deadline=this.timeLimitSeconds>0?now()+this.timeLimitSeconds*1000:null;this.failureReason=null;}
+  get remainingSeconds(){return this.frozenSeconds??(this.deadline===null?0:Math.max(0,Math.ceil((this.deadline-this.now())/1000)));}
+  finish(state,reason=null){if(this.state!=='playing')return;this.frozenSeconds=this.remainingSeconds;this.state=state;this.failureReason=reason;}
+  tick(){if(this.state==='playing'&&this.deadline!==null&&this.now()>=this.deadline)this.finish('lost','timeout');return this.state;}
   get found(){return this.cells.filter(v=>v===1).length;}
-  canEdit(i){return this.state==='playing'&&Number.isInteger(i)&&i>=0&&i<this.cells.length&&this.cells[i]!==1&&this.cells[i]!==3;}
+  canEdit(i){this.tick();return this.state==='playing'&&Number.isInteger(i)&&i>=0&&i<this.cells.length&&this.cells[i]!==1&&this.cells[i]!==3;}
   mark(i,paint=false){if(this.canEdit(i))this.cells[i]=paint?2:this.cells[i]===2?0:2;}
   paint(i,value){if(!this.canEdit(i)||(value!==0&&value!==2)||this.cells[i]===value)return false;this.cells[i]=value;return true;}
   reveal(i){if(!this.canEdit(i))return false;const n=this.level.size,correct=this.level.solution[Math.floor(i/n)]===i%n;
-    if(correct){this.cells[i]=1;if(this.found===n)this.state='won';}else{this.cells[i]=3;if(--this.lives===0)this.state='lost';}return correct;}
+    if(correct){this.cells[i]=1;if(this.found===n)this.finish('won');}else{this.cells[i]=3;if(--this.lives===0)this.finish('lost','lives');}return correct;}
 }
 export class TapInput {
   constructor({single,double,immediate=false,delay=300,setTimer=(fn,ms)=>globalThis.setTimeout(fn,ms),clearTimer=id=>globalThis.clearTimeout(id)}){Object.assign(this,{single,double,immediate,delay,setTimer,clearTimer});this.pending=null;}

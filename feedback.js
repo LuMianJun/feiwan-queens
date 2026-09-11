@@ -1,4 +1,43 @@
 const MASTER_VOLUME=.3;
+// A quiet original eight-bar plucked-key loop, synthesized locally once.
+export class BackgroundMusic {
+  constructor({enabled=true,createContext=()=>{const C=globalThis.AudioContext||globalThis.webkitAudioContext;return C?new C():null;}}={}){
+    Object.assign(this,{enabled,createContext});this.context=null;this.source=null;this.buffer=null;this.epoch=0;
+  }
+  makeBuffer(){
+    const rate=22050,beat=60/84,length=32*beat,buffer=this.context.createBuffer(1,Math.ceil(length*rate),rate),data=buffer.getChannelData(0);
+    const note=(midi,at,duration,volume)=>{
+      const hz=440*2**((midi-69)/12),samples=Math.floor(duration*rate),start=Math.floor(at*rate);
+      for(let i=0;i<samples;i++){
+        const t=i/rate,attack=Math.min(1,t/.018),release=Math.min(1,(duration-t)/.15);
+        const wave=Math.sin(2*Math.PI*hz*t)+.18*Math.sin(4*Math.PI*hz*t);
+        data[(start+i)%data.length]+=volume*wave*attack*release*Math.exp(-t*3/duration);
+      }
+    };
+    const chords=[[60,64,67,71],[57,60,64,67],[53,57,60,64],[55,59,62,69]];
+    const melody=[[76,79,74],[72,76,71],[69,72,76],[74,71,67],[79,76,74],[76,72,71],[72,76,79],[74,71,72]];
+    for(let bar=0;bar<8;bar++){
+      const chord=chords[bar%4],base=bar*4*beat;
+      note(chord[0]-12,base,beat*3.8,.055);
+      [0,2,1,3].forEach((k,j)=>note(chord[k],base+j*beat,beat*1.7,.026));
+      melody[bar].forEach((n,j)=>note(n,base+[.5,2,3][j]*beat,beat*1.1,.035));
+    }
+    return buffer;
+  }
+  async start(){
+    if(!this.enabled||this.source)return;const epoch=this.epoch;
+    try{
+      if(!this.context||this.context.state==='closed'){this.context=this.createContext();this.buffer=null;}
+      if(!this.context)return;
+      if(this.context.state!=='running')await this.context.resume();
+      if(!this.enabled||epoch!==this.epoch||this.source||this.context.state!=='running')return;
+      this.buffer??=this.makeBuffer();
+      const source=this.context.createBufferSource();source.buffer=this.buffer;source.loop=true;source.connect(this.context.destination);source.start();this.source=source;
+    }catch{this.stop();}
+  }
+  stop(){this.epoch++;if(this.source){try{this.source.stop();this.source.disconnect();}catch{}this.source=null;}}
+  setEnabled(value){this.enabled=value;if(value)void this.start();else this.stop();}
+}
 export class Feedback {
   constructor({sound=true,vibration=true,createContext=()=>{const C=globalThis.AudioContext||globalThis.webkitAudioContext;return C?new C():null;},vibrate=typeof navigator!=='undefined'&&typeof navigator.vibrate==='function'?p=>navigator.vibrate(p):null}={}){
     Object.assign(this,{sound,vibration,createContext,vibrate});this.context=null;this.master=null;this.epoch=0;this.lastDrag=0;
