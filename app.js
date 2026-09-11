@@ -1,6 +1,6 @@
-import {installUpdater} from './updater.js?v=20260912-5';
-import {Round,TapInput,ResultGuard,isLevelUnlocked} from './rules.js?v=20260912-5';
-import {Feedback,BackgroundMusic} from './feedback.js?v=20260912-5';
+import {installUpdater} from './updater.js?v=20260912-6';
+import {Round,TapInput,ResultGuard,isLevelUnlocked,GmTapCounter,toggleGm} from './rules.js?v=20260912-6';
+import {Feedback,BackgroundMusic} from './feedback.js?v=20260912-6';
 const $=s=>document.querySelector(s),board=$('#board');
 // Fixed categorical palette: blue, green, yellow, orange, red, pink,
 // violet, navy, cyan, brown, gray, magenta. Avoid multiple similar greens.
@@ -41,12 +41,25 @@ function showPreferences(){for(const [key,label] of [['music','BGM'],['sound','�
 for(const key of ['music','sound','vibration'])$('#'+key+'-toggle').addEventListener('click',()=>{preferences[key]=!preferences[key];if(key==='sound')feedback.setSound(preferences[key]);else if(key==='music')music.setEnabled(preferences[key]);else feedback.setVibration(preferences[key]);try{localStorage.setItem('queens-feedback-v1',JSON.stringify(preferences));}catch{}showPreferences();if(preferences[key]&&key!=='music')feedback.play('mark');});showPreferences();
 try{const a=JSON.parse(localStorage.getItem('queens-garden-complete-v1')||'[]');if(Array.isArray(a))complete=new Set(a.filter(v=>typeof v==='string'));}catch{}
 function save(){try{localStorage.setItem('queens-garden-complete-v1',JSON.stringify([...complete]));}catch{}}
+let gmUnlockAll=false;try{gmUnlockAll=localStorage.getItem('queens-gm-unlock-v1')==='on';}catch{}
+const gmTaps=new GmTapCounter();
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('#help'))gmTaps.reset();},{capture:true});
+window.addEventListener('blur',()=>gmTaps.reset());
+document.addEventListener('visibilitychange',()=>{if(document.hidden)gmTaps.reset();});
+$('#help').addEventListener('click',()=>{
+  if(!round||loading||!gmTaps.tap())return;
+  gmUnlockAll=toggleGm(levels,complete,gmUnlockAll);
+  try{localStorage.setItem('queens-gm-unlock-v1',gmUnlockAll?'on':'off');}catch{}
+  save();
+  if(!gmUnlockAll)start(0);
+  $('#status').textContent=gmUnlockAll?'GM：全部关卡已解锁':'GM：进度已重置，仅开放第一关';
+});
 function reveal(i){if(!round?.canEdit(i))return;const correct=round.reveal(i);feedback.play(correct?(round.state==='won'?'win':'correct'):'wrong');$('#status').textContent=correct?'':('这里没有肥丸。'+(round.lives?'还剩 1 滴血。':''));render();}
 function mark(i){if(!round?.canEdit(i))return;round.mark(i);feedback.play(round.cells[i]===2?'mark':'erase');render();}
 const resultGuard=new ResultGuard();
 const taps=new TapInput({single:mark,double:reveal,immediate:true});
 function clearInput(){taps.cancel();gesture=null;}
-function start(index){if(!isLevelUnlocked(levels,complete,index))return;clearTimeout(resultTimer);clearInput();current=index;round=new Round(levels[index]);shownResult=false;
+function start(index){if(!isLevelUnlocked(levels,complete,index,gmUnlockAll))return;clearTimeout(resultTimer);clearInput();current=index;round=new Round(levels[index]);shownResult=false;
   $('#result-dialog').close();$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#title').textContent='第 '+(index+1)+' 关';$('#size').textContent=round.level.size+' × '+round.level.size;$('#status').textContent='';board.style.setProperty('--size',round.level.size);board.replaceChildren();
   for(let i=0;i<round.cells.length;i++){const b=document.createElement('button');b.type='button';b.className='cell';b.dataset.index=i;b.tabIndex=i===0?0:-1;const n=round.level.size;const region=round.level.regions[Math.floor(i/n)][i%n];b.dataset.region=region;b.style.setProperty('--cell',colors[region]);b.style.backgroundImage=patterns[region].image;b.style.backgroundSize='16px 16px';const mark=document.createElement('span');mark.className='mark';mark.setAttribute('aria-hidden','true');b.append(mark);board.append(b);}
   $('#reset').disabled=false;render();
@@ -63,7 +76,7 @@ function render(){if(!round)return;round.tick();updateClock();const n=round.leve
 function showLevels(){if(round?.state!=='playing')shownResult=false;clearTimeout(resultTimer);clearInput();$('#result-dialog').close();$('#reset-dialog').close();$('#play-screen').hidden=true;$('#levels-screen').hidden=false;$('#completion').textContent='已完成 '+levels.filter(l=>complete.has(l.id)).length+' / '+levels.length+' 关';$('#level-list').replaceChildren();
   const row=document.createElement('div');row.className='level-buttons';
   levels.forEach((l,i)=>{
-    const unlocked=isLevelUnlocked(levels,complete,i),done=complete.has(l.id),b=document.createElement('button');
+    const unlocked=isLevelUnlocked(levels,complete,i,gmUnlockAll),done=complete.has(l.id),b=document.createElement('button');
     b.type='button';b.disabled=!unlocked;b.className=(i===current?'current ':'')+(done?'done':'');
     b.textContent=String(i+1).padStart(2,'0');
     b.setAttribute('aria-label','第 '+(i+1)+' 关，'+(done?'已完成':unlocked?'已解锁':'未解锁'));
@@ -124,8 +137,8 @@ function prepareCharacter(){return new Promise((resolve,reject)=>{
   function finish(error){clearTimeout(timeout);character.onload=character.onerror=null;error?reject(error):resolve();}
   character.onload=()=>{if(character.decode)character.decode().then(()=>finish(),finish);else finish();};
   character.onerror=()=>finish(Error('character load'));
-  character.src='./feiwan.webp?v=20260912-5';
+  character.src='./feiwan.webp?v=20260912-6';
 });}
-async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-5',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
+async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-6',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
 $('#retry').addEventListener('click',load);load();
 installUpdater();

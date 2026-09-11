@@ -1,8 +1,19 @@
-export function isLevelUnlocked(levels,complete,index){
+export function isLevelUnlocked(levels,complete,index,unlockAll=false){
   if(!Number.isInteger(index)||index<0||index>=levels.length)return false;
+  if(unlockAll)return true;
   if(complete.has(levels[index].id))return true; // Preserve previously earned replay access.
   const firstIncomplete=levels.findIndex(level=>!complete.has(level.id));
   return firstIncomplete===-1||index<=firstIncomplete;
+}
+export class GmTapCounter{
+  constructor(now=()=>performance.now()){this.now=now;this.reset();}
+  reset(){this.count=0;this.last=-Infinity;}
+  tap(){const time=this.now();if(time-this.last>1500)this.count=0;this.last=time;if(++this.count<10)return false;this.reset();return true;}
+}
+export function toggleGm(levels,complete,unlockAll){
+  const allUnlocked=levels.length>0&&levels.every((_,i)=>isLevelUnlocked(levels,complete,i,unlockAll));
+  if(allUnlocked)complete.clear();
+  return !allUnlocked;
 }
 export function analyze(level,cells){
   const n=level.size,stars=[];cells.forEach((v,i)=>{if(v===1)stars.push(i);});const conflicts=new Set();
