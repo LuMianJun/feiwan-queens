@@ -19,6 +19,7 @@ export class Round {
   get found(){return this.cells.filter(v=>v===1).length;}
   canEdit(i){return this.state==='playing'&&Number.isInteger(i)&&i>=0&&i<this.cells.length&&this.cells[i]!==1&&this.cells[i]!==3;}
   mark(i,paint=false){if(this.canEdit(i))this.cells[i]=paint?2:this.cells[i]===2?0:2;}
+  paint(i,value){if(!this.canEdit(i)||(value!==0&&value!==2)||this.cells[i]===value)return false;this.cells[i]=value;return true;}
   reveal(i){if(!this.canEdit(i))return false;const n=this.level.size,correct=this.level.solution[Math.floor(i/n)]===i%n;
     if(correct){this.cells[i]=1;if(this.found===n)this.state='won';}else{this.cells[i]=3;if(--this.lives===0)this.state='lost';}return correct;}
 }
@@ -27,4 +28,13 @@ export class TapInput {
   tap(i){if(this.pending?.i===i){this.clearTimer(this.pending.timer);this.pending=null;this.double(i);return;}this.flush();if(this.immediate)this.single(i);const p={i};p.timer=this.setTimer(()=>{if(this.pending!==p)return;this.pending=null;if(!this.immediate)this.single(i);},this.delay);this.pending=p;}
   flush(){if(!this.pending)return;const p=this.pending;this.clearTimer(p.timer);this.pending=null;if(!this.immediate)this.single(p.i);}
   cancel(){if(this.pending)this.clearTimer(this.pending.timer);this.pending=null;}
+}
+// A result action must start after the quiet period and finish on the same button.
+export class ResultGuard {
+  constructor(now=()=>performance.now()){this.now=now;this.reset();}
+  reset(){this.readyAt=this.now()+350;this.cancel();}
+  cancel(){this.press=null;this.completed=null;}
+  begin(target,id){this.cancel();if(this.now()>=this.readyAt)this.press={target,id};}
+  end(target,id){if(this.press?.target===target&&this.press.id===id)this.completed=target;this.press=null;}
+  consume(target){const allowed=this.now()>=this.readyAt&&this.completed===target;this.cancel();return allowed;}
 }

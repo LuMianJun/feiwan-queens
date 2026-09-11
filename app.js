@@ -1,5 +1,5 @@
-import {Round,TapInput} from './rules.js?v=20260912-2';
-import {Feedback} from './feedback.js?v=20260912-2';
+import {Round,TapInput,ResultGuard} from './rules.js?v=20260912-3';
+import {Feedback} from './feedback.js?v=20260912-3';
 const $=s=>document.querySelector(s),board=$('#board');
 const colors=['#b79adb','#7fb9db','#91c59c','#e9c66b','#e59baf','#70c9c8','#9ba6db','#d9a077'];
 let levels=[],current=0,round=null,gesture=null,shownResult=false,loading=false,complete=new Set();
@@ -11,6 +11,7 @@ try{const a=JSON.parse(localStorage.getItem('queens-garden-complete-v1')||'[]');
 function save(){try{localStorage.setItem('queens-garden-complete-v1',JSON.stringify([...complete]));}catch{}}
 function reveal(i){if(!round?.canEdit(i))return;const correct=round.reveal(i);feedback.play(correct?(round.state==='won'?'win':'correct'):'wrong');$('#status').textContent=correct?'':('这里没有肥丸。'+(round.lives?'还剩 1 滴血。':''));render();}
 function mark(i){if(!round?.canEdit(i))return;round.mark(i);feedback.play(round.cells[i]===2?'mark':'erase');render();}
+const resultGuard=new ResultGuard();
 const taps=new TapInput({single:mark,double:reveal,immediate:true});
 function clearInput(){taps.cancel();gesture=null;}
 function start(index){clearInput();current=index;round=new Round(levels[index]);shownResult=false;
@@ -21,7 +22,7 @@ function start(index){clearInput();current=index;round=new Round(levels[index]);
 function render(){if(!round)return;const n=round.level.size;$('#remaining').textContent=n-round.found;
   $('#hearts').setAttribute('aria-label','剩余'+round.lives+'滴血');[...$('#hearts').children].forEach((h,i)=>h.classList.toggle('lost',i>=round.lives));
   [...board.children].forEach((b,i)=>{const v=round.cells[i];b.className='cell'+(v===1?' found':v===2?' cross':v===3?' wrong':'');b.setAttribute('aria-disabled',String(!round.canEdit(i)));b.setAttribute('aria-label','第'+(Math.floor(i/n)+1)+'行第'+(i%n+1)+'列，'+['空格','已找到肥丸，锁定','已打叉','错误位置，锁定'][v]);});
-  if(round.state!=='playing'&&!shownResult){shownResult=true;clearInput();const won=round.state==='won';if(won){complete.add(round.level.id);save();}
+  if(round.state!=='playing'&&!shownResult){shownResult=true;clearInput();resultGuard.reset();const won=round.state==='won';if(won){complete.add(round.level.id);save();}
     $('#result-symbol').textContent=won?'✦':'♡';$('#result-title').textContent=won?'肥丸都找到了！':'两滴血用完啦';$('#result-copy').textContent=won?'下一关，继续找肥丸。':'重新开始，再试一次。';$('#result-action').textContent=won?(current===levels.length-1?'再玩本关':'下一关'):'再试一次';$('#result-dialog').showModal();
   }
 }
@@ -29,10 +30,10 @@ function showLevels(){clearInput();$('#result-dialog').close();$('#reset-dialog'
   for(const n of [...new Set(levels.map(l=>l.size))]){const s=document.createElement('section');s.className='level-group';const h=document.createElement('h2');h.textContent=n+' × '+n;const row=document.createElement('div');row.className='level-buttons';levels.forEach((l,i)=>{if(l.size!==n)return;const b=document.createElement('button');b.className=(i===current?'current ':'')+(complete.has(l.id)?'done':'');const name=document.createElement('span');name.textContent=String(i+1).padStart(2,'0');const sub=document.createElement('small');sub.textContent=complete.has(l.id)?'已完成':'第 '+(i+1)+' 关';b.append(name,sub);b.addEventListener('click',()=>start(i));row.append(b);});s.append(h,row);$('#level-list').append(s);}$('#back').focus();
 }
 function indexAt(x,y){const rect=board.getBoundingClientRect(),n=round.level.size;if(x<rect.left||x>=rect.right||y<rect.top||y>=rect.bottom)return -1;return Math.floor((y-rect.top)/rect.height*n)*n+Math.floor((x-rect.left)/rect.width*n);}
-function paintLine(a,b){let changed=false;const rect=board.getBoundingClientRect(),steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(Math.min(rect.width,rect.height)/round.level.size/3)));for(let k=0;k<=steps;k++){const i=indexAt(a.x+(b.x-a.x)*k/steps,a.y+(b.y-a.y)*k/steps);if(round.canEdit(i)&&round.cells[i]!==2){round.mark(i,true);changed=true;}}if(changed)feedback.play('drag');render();}
-board.addEventListener('pointerdown',e=>{if(!round||round.state!=='playing'||gesture||e.button!==0)return;const b=e.target.closest('.cell');if(!b)return;e.preventDefault();void feedback.unlock();const i=Number(b.dataset.index);gesture={id:e.pointerId,index:i,start:{x:e.clientX,y:e.clientY},last:{x:e.clientX,y:e.clientY},drag:false};board.setPointerCapture(e.pointerId);b.focus({preventScroll:true});});
-board.addEventListener('pointermove',e=>{if(!gesture||gesture.id!==e.pointerId)return;const next={x:e.clientX,y:e.clientY};if(!gesture.drag&&Math.hypot(next.x-gesture.start.x,next.y-gesture.start.y)>8){gesture.drag=true;taps.cancel();round.mark(gesture.index,true);}if(gesture.drag)paintLine(gesture.last,next);gesture.last=next;});
-board.addEventListener('pointerup',e=>{if(!gesture||gesture.id!==e.pointerId)return;const g=gesture;gesture=null;if(g.drag)paintLine(g.last,{x:e.clientX,y:e.clientY});else {const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest('.cell');if(hit&&board.contains(hit)&&Number(hit.dataset.index)===g.index)taps.tap(g.index);}if(board.hasPointerCapture(e.pointerId))board.releasePointerCapture(e.pointerId);});
+function paintLine(a,b,value){let changed=false;const rect=board.getBoundingClientRect(),steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(Math.min(rect.width,rect.height)/round.level.size/3)));for(let k=0;k<=steps;k++){const i=indexAt(a.x+(b.x-a.x)*k/steps,a.y+(b.y-a.y)*k/steps);if(round.paint(i,value))changed=true;}if(changed)feedback.play('drag');render();}
+board.addEventListener('pointerdown',e=>{if(!round||round.state!=='playing'||gesture||e.button!==0)return;const b=e.target.closest('.cell');if(!b)return;e.preventDefault();void feedback.unlock();const i=Number(b.dataset.index);gesture={id:e.pointerId,index:i,value:round.cells[i]===0?2:0,start:{x:e.clientX,y:e.clientY},last:{x:e.clientX,y:e.clientY},drag:false};board.setPointerCapture(e.pointerId);b.focus({preventScroll:true});});
+board.addEventListener('pointermove',e=>{if(!gesture||gesture.id!==e.pointerId)return;const next={x:e.clientX,y:e.clientY};if(!gesture.drag&&Math.hypot(next.x-gesture.start.x,next.y-gesture.start.y)>8){gesture.drag=true;taps.cancel();gesture.last=gesture.start;}if(gesture.drag)paintLine(gesture.last,next,gesture.value);gesture.last=next;});
+board.addEventListener('pointerup',e=>{if(!gesture||gesture.id!==e.pointerId)return;const g=gesture;gesture=null;if(g.drag)paintLine(g.last,{x:e.clientX,y:e.clientY},g.value);else {const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest('.cell');if(hit&&board.contains(hit)&&Number(hit.dataset.index)===g.index)taps.tap(g.index);}if(board.hasPointerCapture(e.pointerId))board.releasePointerCapture(e.pointerId);});
 for(const name of ['pointercancel','lostpointercapture'])board.addEventListener(name,()=>{gesture=null;});
 board.addEventListener('contextmenu',e=>e.preventDefault());board.addEventListener('dblclick',e=>e.preventDefault());
 board.addEventListener('click',e=>{if(e.detail!==0)return;const b=e.target.closest('.cell');if(b){void feedback.unlock();taps.cancel();mark(Number(b.dataset.index));}});
@@ -43,13 +44,34 @@ board.addEventListener('keydown',e=>{const b=e.target.closest('.cell');if(!b||!r
 window.addEventListener('blur',()=>{clearInput();feedback.stop();});document.addEventListener('visibilitychange',()=>{if(document.hidden){clearInput();feedback.stop();}});
 $('#choose').addEventListener('click',showLevels);$('#result-levels').addEventListener('click',showLevels);$('#back').addEventListener('click',()=>{$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#choose').focus();});
 $('#reset').addEventListener('click',()=>{clearInput();$('#reset-dialog').showModal();});$('#cancel-reset').addEventListener('click',()=>$('#reset-dialog').close());$('#confirm-reset').addEventListener('click',()=>{$('#reset-dialog').close();start(current);});$('#result-action').addEventListener('click',()=>start(round.state==='won'&&current<levels.length-1?current+1:current));
+// Capture activation before the existing result button click handlers run.
+const resultDialog=$('#result-dialog');
+resultDialog.addEventListener('pointerdown',e=>{
+  const button=e.target.closest('button');if(e.button===0&&button)resultGuard.begin(button,e.pointerId);
+});
+resultDialog.addEventListener('pointerup',e=>{
+  const button=document.elementFromPoint(e.clientX,e.clientY)?.closest('button');
+  resultGuard.end(button,e.pointerId);
+});
+resultDialog.addEventListener('pointercancel',()=>resultGuard.cancel());
+resultDialog.addEventListener('keydown',e=>{
+  if((e.key==='Enter'||e.key===' ')&&!e.repeat&&e.target.matches('button')){
+    resultGuard.begin(e.target,'key');resultGuard.end(e.target,'key');
+  }
+});
+resultDialog.addEventListener('click',e=>{
+  const button=e.target.closest('button');
+  if(button&&!resultGuard.consume(button)){e.preventDefault();e.stopImmediatePropagation();}
+},true);
+resultDialog.addEventListener('close',()=>resultGuard.cancel());
+window.addEventListener('blur',()=>resultGuard.cancel());
 const character=new Image();
 function prepareCharacter(){return new Promise((resolve,reject)=>{
   const timeout=setTimeout(()=>finish(Error('character timeout')),12000);
   function finish(error){clearTimeout(timeout);character.onload=character.onerror=null;error?reject(error):resolve();}
   character.onload=()=>{if(character.decode)character.decode().then(()=>finish(),finish);else finish();};
   character.onerror=()=>finish(Error('character load'));
-  character.src='./feiwan.webp?v=20260912-2';
+  character.src='./feiwan.webp?v=20260912-3';
 });}
-async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-2',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>8||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
+async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-3',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>8||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
 $('#retry').addEventListener('click',load);load();
