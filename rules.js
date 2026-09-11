@@ -23,8 +23,8 @@ export class Round {
     if(correct){this.cells[i]=1;if(this.found===n)this.state='won';}else{this.cells[i]=3;if(--this.lives===0)this.state='lost';}return correct;}
 }
 export class TapInput {
-  constructor({single,double,delay=300,setTimer=(fn,ms)=>globalThis.setTimeout(fn,ms),clearTimer=id=>globalThis.clearTimeout(id)}){Object.assign(this,{single,double,delay,setTimer,clearTimer});this.pending=null;}
-  tap(i){if(this.pending?.i===i){this.clearTimer(this.pending.timer);this.pending=null;this.double(i);return;}this.flush();const p={i};p.timer=this.setTimer(()=>{if(this.pending!==p)return;this.pending=null;this.single(i);},this.delay);this.pending=p;}
-  flush(){if(!this.pending)return;const p=this.pending;this.clearTimer(p.timer);this.pending=null;this.single(p.i);}
+  constructor({single,double,immediate=false,delay=300,setTimer=(fn,ms)=>globalThis.setTimeout(fn,ms),clearTimer=id=>globalThis.clearTimeout(id)}){Object.assign(this,{single,double,immediate,delay,setTimer,clearTimer});this.pending=null;}
+  tap(i){if(this.pending?.i===i){this.clearTimer(this.pending.timer);this.pending=null;this.double(i);return;}this.flush();if(this.immediate)this.single(i);const p={i};p.timer=this.setTimer(()=>{if(this.pending!==p)return;this.pending=null;if(!this.immediate)this.single(i);},this.delay);this.pending=p;}
+  flush(){if(!this.pending)return;const p=this.pending;this.clearTimer(p.timer);this.pending=null;if(!this.immediate)this.single(p.i);}
   cancel(){if(this.pending)this.clearTimer(this.pending.timer);this.pending=null;}
 }

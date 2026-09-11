@@ -1,5 +1,5 @@
-import {Round,TapInput} from './rules.js?v=20260912-1';
-import {Feedback} from './feedback.js?v=20260912-1';
+import {Round,TapInput} from './rules.js?v=20260912-2';
+import {Feedback} from './feedback.js?v=20260912-2';
 const $=s=>document.querySelector(s),board=$('#board');
 const colors=['#b79adb','#7fb9db','#91c59c','#e9c66b','#e59baf','#70c9c8','#9ba6db','#d9a077'];
 let levels=[],current=0,round=null,gesture=null,shownResult=false,loading=false,complete=new Set();
@@ -11,7 +11,7 @@ try{const a=JSON.parse(localStorage.getItem('queens-garden-complete-v1')||'[]');
 function save(){try{localStorage.setItem('queens-garden-complete-v1',JSON.stringify([...complete]));}catch{}}
 function reveal(i){if(!round?.canEdit(i))return;const correct=round.reveal(i);feedback.play(correct?(round.state==='won'?'win':'correct'):'wrong');$('#status').textContent=correct?'':('这里没有肥丸。'+(round.lives?'还剩 1 滴血。':''));render();}
 function mark(i){if(!round?.canEdit(i))return;round.mark(i);feedback.play(round.cells[i]===2?'mark':'erase');render();}
-const taps=new TapInput({single:mark,double:reveal});
+const taps=new TapInput({single:mark,double:reveal,immediate:true});
 function clearInput(){taps.cancel();gesture=null;}
 function start(index){clearInput();current=index;round=new Round(levels[index]);shownResult=false;
   $('#result-dialog').close();$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#title').textContent='第 '+(index+1)+' 关';$('#size').textContent=round.level.size+' × '+round.level.size;$('#status').textContent='';board.style.setProperty('--size',round.level.size);board.replaceChildren();
@@ -43,5 +43,13 @@ board.addEventListener('keydown',e=>{const b=e.target.closest('.cell');if(!b||!r
 window.addEventListener('blur',()=>{clearInput();feedback.stop();});document.addEventListener('visibilitychange',()=>{if(document.hidden){clearInput();feedback.stop();}});
 $('#choose').addEventListener('click',showLevels);$('#result-levels').addEventListener('click',showLevels);$('#back').addEventListener('click',()=>{$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#choose').focus();});
 $('#reset').addEventListener('click',()=>{clearInput();$('#reset-dialog').showModal();});$('#cancel-reset').addEventListener('click',()=>$('#reset-dialog').close());$('#confirm-reset').addEventListener('click',()=>{$('#reset-dialog').close();start(current);});$('#result-action').addEventListener('click',()=>start(round.state==='won'&&current<levels.length-1?current+1:current));
-async function load(){if(loading)return;loading=true;$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const r=await fetch('./levels.json?v=20260912-1',{signal:controller.signal});if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>8||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡未加载，请检查本地服务后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
+const character=new Image();
+function prepareCharacter(){return new Promise((resolve,reject)=>{
+  const timeout=setTimeout(()=>finish(Error('character timeout')),12000);
+  function finish(error){clearTimeout(timeout);character.onload=character.onerror=null;error?reject(error):resolve();}
+  character.onload=()=>{if(character.decode)character.decode().then(()=>finish(),finish);else finish();};
+  character.onerror=()=>finish(Error('character load'));
+  character.src='./feiwan.webp?v=20260912-2';
+});}
+async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-2',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>8||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
 $('#retry').addEventListener('click',load);load();
