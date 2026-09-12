@@ -1,4 +1,15 @@
 const MASTER_VOLUME=.3;
+export class CountdownWarning {
+  constructor(now=()=>performance.now()){this.now=now;this.sessions=new WeakMap();}
+  check(session,seconds,active=true){
+    const state=this.sessions.get(session)||{previous:Infinity,last:-Infinity};
+    const crossed=state.previous>30&&seconds<=30&&seconds>0;
+    state.previous=seconds;this.sessions.set(session,state);
+    if(!active||!crossed)return false;
+    const now=this.now();if(now-state.last<10000)return false;
+    state.last=now;return true;
+  }
+}
 // A quiet original eight-bar plucked-key loop, synthesized locally once.
 export class BackgroundMusic {
   constructor({enabled=true,createContext=()=>{const C=globalThis.AudioContext||globalThis.webkitAudioContext;return C?new C():null;}}={}){
@@ -53,10 +64,14 @@ export class Feedback {
   stop(){this.epoch++;if(this.master)this.master.gain.value=0;if(this.vibrate)try{this.vibrate(0);}catch{}}
   play(kind){
     if(kind==='drag'){const now=Date.now();if(now-this.lastDrag<75)return;this.lastDrag=now;}
-    if(kind!=='record'&&this.vibration&&this.vibrate)try{this.vibrate(kind==='wrong'?[80,45,80]:kind==='win'?[50,45,70]:kind==='correct'?55:kind==='drag'?18:25);}catch{}
+    if(kind!=='record'&&kind!=='warning'&&this.vibration&&this.vibrate)try{this.vibrate(kind==='wrong'?[80,45,80]:kind==='win'?[50,45,70]:kind==='correct'?55:kind==='drag'?18:25);}catch{}
     const epoch=this.epoch,started=Date.now();
     void this.unlock().then(ready=>{if(!ready||!this.sound||epoch!==this.epoch||Date.now()-started>250)return;
-      try{const c=this.context;this.master.gain.value=MASTER_VOLUME;const record=kind==='record',notes=record?[659,880]:kind==='wrong'?[190,140]:kind==='win'?[523,659,784]:kind==='correct'?[660,880]:[kind==='erase'?350:470];
+      try{const c=this.context;this.master.gain.value=MASTER_VOLUME;
+        if(kind==='warning'){
+          [880,660,880].forEach((hz,i)=>{const t=c.currentTime+i*.18,o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.value=hz;g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(.65,t+.012);g.gain.exponentialRampToValueAtTime(.001,t+.13);o.connect(g);g.connect(this.master);o.onended=()=>{o.disconnect();g.disconnect();};o.start(t);o.stop(t+.14);});return;
+        }
+        const record=kind==='record',notes=record?[659,880]:kind==='wrong'?[190,140]:kind==='win'?[523,659,784]:kind==='correct'?[660,880]:[kind==='erase'?350:470];
         notes.forEach((hz,i)=>{const t=c.currentTime+i*(record?.24:.08),duration=record?.18:.085,o=c.createOscillator(),g=c.createGain();o.type=kind==='wrong'||record?'triangle':'sine';o.frequency.value=hz;g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(.5,t+(record?.015:.006));g.gain.exponentialRampToValueAtTime(.001,t+duration);o.connect(g);g.connect(this.master);o.onended=()=>{o.disconnect();g.disconnect();};o.start(t);o.stop(t+duration+.005);});
       }catch{}
     });

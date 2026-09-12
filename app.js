@@ -3,7 +3,7 @@ import {openLessons} from './lessons.js?v=20260913-8';
 import {beijingDate} from './daily.js?v=20260913-1';
 import {ChallengeClock,ChallengeRound,LevelFactory,ChallengeBest,challengeResult} from './challenge.js?v=20260913-1';
 import {Round,TapInput,ResultGuard,isLevelUnlocked,latestUnlockedLevel,needsTutorial,GmTapCounter,toggleGm} from './rules.js?v=20260913-1';
-import {Feedback,BackgroundMusic} from './feedback.js?v=20260913-1';
+import {Feedback,BackgroundMusic,CountdownWarning} from './feedback.js?v=20260913-9';
 const $=s=>document.querySelector(s),board=$('#board');
 // Fixed categorical palette: blue, green, yellow, orange, red, pink,
 // violet, navy, cyan, brown, gray, magenta. Avoid multiple similar greens.
@@ -90,6 +90,7 @@ $('#challenge-start').addEventListener('click',beginChallenge);
 let levels=[],current=0,round=null,gesture=null,shownResult=false,loading=false,complete=new Set(),teachingActive=false;
 let preferences={sound:true,vibration:true,music:true};try{const p=JSON.parse(localStorage.getItem('queens-feedback-v1')||'{}');preferences={sound:p.sound!==false,vibration:p.vibration!==false,music:p.music!==false};}catch{}
 const feedback=new Feedback(preferences);
+const countdownWarning=new CountdownWarning();
 const music=new BackgroundMusic({enabled:preferences.music});
 let patternsEnabled=false;try{patternsEnabled=localStorage.getItem('queens-patterns-v1')==='on';}catch{}
 function showPatterns(){board.classList.toggle('patterns-off',!patternsEnabled);$('#pattern-toggle').textContent='花纹：'+(patternsEnabled?'开':'关');$('#pattern-toggle').setAttribute('aria-pressed',String(patternsEnabled));}
@@ -213,6 +214,7 @@ window.addEventListener('blur',()=>resultGuard.cancel());
 function updateClock(){
   if(!round)return;
   const clock=$('#countdown');clock.hidden=round.timeLimitSeconds===0;
+  if(!clock.hidden&&countdownWarning.check(challenge?.clock||round,round.remainingSeconds,round.state==='playing'&&!transitioning&&!teachingActive&&!document.hidden&&preferences.sound))feedback.play('warning');
   if(!clock.hidden){const remaining=round.remainingSeconds;clock.textContent='剩余 '+Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0');clock.classList.toggle('urgent',remaining<=20);}
 }
 setInterval(()=>{
