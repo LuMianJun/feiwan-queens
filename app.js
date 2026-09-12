@@ -32,7 +32,7 @@ let resultTimer=null;
 let challenge=null,transitioning=false;
 let daily=null,dailyComplete=new Set();
 try{const saved=JSON.parse(localStorage.getItem('queens-daily-complete-v2')||'[]');if(Array.isArray(saved))dailyComplete=new Set(saved.filter(d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)));}catch{}
-function showDaily(){const date=beijingDate();$('#daily-state').textContent=date+' · '+(dailyComplete.has(date)?'已连续完成 '+dailyStreak(dailyComplete,date)+' 天':'未完成');}
+function showDaily(){const date=beijingDate();$('#daily-state').textContent=date+'\n'+(dailyComplete.has(date)?'已连续完成 '+dailyStreak(dailyComplete,date)+' 天':'未完成');}
 showDaily();setInterval(showDaily,60000);
 async function beginDaily(date=beijingDate()){
   leaveChallenge();clearTimeout(resultTimer);clearInput();round=null;shownResult=false;
