@@ -1,6 +1,7 @@
-import {installUpdater} from './updater.js?v=20260912-6';
-import {Round,TapInput,ResultGuard,isLevelUnlocked,GmTapCounter,toggleGm} from './rules.js?v=20260912-6';
-import {Feedback,BackgroundMusic} from './feedback.js?v=20260912-6';
+import {installUpdater} from './updater.js?v=20260912-7';
+import {ChallengeClock,ChallengeRound,LevelFactory,ChallengeBest,challengeResult} from './challenge.js?v=20260912-7';
+import {Round,TapInput,ResultGuard,isLevelUnlocked,latestUnlockedLevel,GmTapCounter,toggleGm} from './rules.js?v=20260912-7';
+import {Feedback,BackgroundMusic} from './feedback.js?v=20260912-7';
 const $=s=>document.querySelector(s),board=$('#board');
 // Fixed categorical palette: blue, green, yellow, orange, red, pink,
 // violet, navy, cyan, brown, gray, magenta. Avoid multiple similar greens.
@@ -26,11 +27,50 @@ const patterns=patternDefinitions.map(([name,shape],i)=>{
   return {name,image:`url("data:image/svg+xml,${encodeURIComponent(svg)}")`};
 });
 let resultTimer=null;
+let challenge=null,transitioning=false;
+let challengeStorage;try{challengeStorage=window.localStorage;}catch{}
+const challengeBest=new ChallengeBest(challengeStorage);
+function showChallengeBest(){$('#challenge-best').textContent='本机最佳：'+challengeBest.value+' 关';}
+showChallengeBest();
+function leaveChallenge(){challenge?.factory?.cancel();challenge=null;transitioning=false;board.inert=false;board.classList.remove('switch-out','switch-in');$('#loading').hidden=true;$('#hearts').hidden=false;$('#challenge-info').hidden=true;document.body.classList.remove('challenge-mode');}
+async function beginChallenge(){
+  leaveChallenge();clearTimeout(resultTimer);clearInput();round=null;shownResult=false;
+  const session={clock:new ChallengeClock(),factory:null,next:null,bestAtStart:challengeBest.value};challenge=session;
+  $('#result-dialog').close();$('#reset-dialog').close();$('#levels-screen').hidden=true;$('#play-screen').hidden=false;
+  $('#hearts').hidden=true;$('#challenge-info').hidden=false;document.body.classList.add('challenge-mode');
+  $('#title').textContent='极限挑战';$('#status').textContent='';$('#countdown').hidden=false;$('#countdown').textContent='剩余 1:00';
+  await nextChallenge(session);
+}
+async function nextChallenge(session){
+  if(challenge!==session)return;transitioning=true;clearInput();board.inert=true;session.clock.pause();
+  const number=session.clock.completed+1;
+  $('#reset').disabled=true;$('#loading').hidden=false;$('#retry').hidden=true;
+  $('#load-message').textContent=(number>1?'已完成 '+session.clock.completed+' 关 · ':'')+'正在准备第 '+number+' 关，计时暂停';
+  board.classList.add('switch-out');
+  try{
+    if(!session.factory)session.factory=new LevelFactory();
+    const result=await (session.next||session.factory.generate(number));session.next=null;
+    if(challenge!==session)return;if(result.error)throw Error(result.error);
+    start(0,result.level);
+    // The next board is ready; animate it in with input and clock still paused.
+    $('#loading').hidden=true;board.classList.remove('switch-out');board.classList.add('switch-in');
+    await new Promise(resolve=>setTimeout(resolve,window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:380));
+    if(challenge!==session)return;
+    if(document.hidden)await new Promise(resolve=>{const visible=()=>{if(!document.hidden){document.removeEventListener('visibilitychange',visible);resolve();}};document.addEventListener('visibilitychange',visible);});
+    if(challenge!==session)return;
+    $('#loading').hidden=true;board.classList.remove('switch-in');board.inert=false;transitioning=false;$('#reset').disabled=false;
+    session.clock.resume();render();session.next=session.factory.generate(number+1);
+  }catch{
+    if(challenge!==session)return;session.factory?.cancel();session.factory=null;session.next=null;
+    $('#load-message').textContent='关卡生成失败，计时已暂停';$('#retry').hidden=false;
+  }
+}
+$('#challenge-start').addEventListener('click',beginChallenge);
 let levels=[],current=0,round=null,gesture=null,shownResult=false,loading=false,complete=new Set();
 let preferences={sound:true,vibration:true,music:true};try{const p=JSON.parse(localStorage.getItem('queens-feedback-v1')||'{}');preferences={sound:p.sound!==false,vibration:p.vibration!==false,music:p.music!==false};}catch{}
 const feedback=new Feedback(preferences);
 const music=new BackgroundMusic({enabled:preferences.music});
-let patternsEnabled=true;try{patternsEnabled=localStorage.getItem('queens-patterns-v1')!=='off';}catch{}
+let patternsEnabled=false;try{patternsEnabled=localStorage.getItem('queens-patterns-v1')==='on';}catch{}
 function showPatterns(){board.classList.toggle('patterns-off',!patternsEnabled);$('#pattern-toggle').textContent='花纹：'+(patternsEnabled?'开':'关');$('#pattern-toggle').setAttribute('aria-pressed',String(patternsEnabled));}
 $('#pattern-toggle').addEventListener('click',()=>{patternsEnabled=!patternsEnabled;try{localStorage.setItem('queens-patterns-v1',patternsEnabled?'on':'off');}catch{}showPatterns();});showPatterns();
 document.addEventListener('pointerdown',e=>{if(!document.hidden&&!e.target.closest('#music-toggle'))void music.start();},{capture:true});
@@ -47,33 +87,59 @@ document.addEventListener('pointerdown',e=>{if(!e.target.closest('#help'))gmTaps
 window.addEventListener('blur',()=>gmTaps.reset());
 document.addEventListener('visibilitychange',()=>{if(document.hidden)gmTaps.reset();});
 $('#help').addEventListener('click',()=>{
-  if(!round||loading||!gmTaps.tap())return;
+  if(challenge||!round||loading||!gmTaps.tap())return;
   gmUnlockAll=toggleGm(levels,complete,gmUnlockAll);
   try{localStorage.setItem('queens-gm-unlock-v1',gmUnlockAll?'on':'off');}catch{}
   save();
   if(!gmUnlockAll)start(0);
   $('#status').textContent=gmUnlockAll?'GM：全部关卡已解锁':'GM：进度已重置，仅开放第一关';
 });
-function reveal(i){if(!round?.canEdit(i))return;const correct=round.reveal(i);feedback.play(correct?(round.state==='won'?'win':'correct'):'wrong');$('#status').textContent=correct?'':('这里没有肥丸。'+(round.lives?'还剩 1 滴血。':''));render();}
-function mark(i){if(!round?.canEdit(i))return;round.mark(i);feedback.play(round.cells[i]===2?'mark':'erase');render();}
+function floatTimeChange(i,correct){
+  const cell=board.children[i];if(!cell)return;
+  const rect=cell.getBoundingClientRect(),label=document.createElement('span');
+  label.className='time-float '+(correct?'time-gain':'time-loss');label.textContent=correct?'+5s':'−5s';label.setAttribute('aria-hidden','true');
+  label.style.left=Math.max(30,Math.min(window.innerWidth-30,rect.left+rect.width/2))+'px';
+  label.style.top=Math.max(48,rect.top+rect.height/2)+'px';
+  // Outside the board so cell clipping and next-board animations cannot cut it off.
+  document.body.append(label);label.addEventListener('animationend',()=>label.remove(),{once:true});setTimeout(()=>label.remove(),1000);
+}
+function reveal(i){if(transitioning||!round?.canEdit(i))return;const correct=round.reveal(i);feedback.play(correct?(round.state==='won'?'win':'correct'):'wrong');if(challenge)floatTimeChange(i,correct);$('#status').textContent=challenge?(correct?'+5 秒':'−5 秒'):correct?'':('这里没有肥丸。'+(round.lives?'还剩 1 滴血。':''));render();}
+function mark(i){if(transitioning||!round?.canEdit(i))return;round.mark(i);feedback.play(round.cells[i]===2?'mark':'erase');render();}
 const resultGuard=new ResultGuard();
 const taps=new TapInput({single:mark,double:reveal,immediate:true});
 function clearInput(){taps.cancel();gesture=null;}
-function start(index){if(!isLevelUnlocked(levels,complete,index,gmUnlockAll))return;clearTimeout(resultTimer);clearInput();current=index;round=new Round(levels[index]);shownResult=false;
+function start(index,generated=null){if(!generated&&!isLevelUnlocked(levels,complete,index,gmUnlockAll))return;if(!generated)leaveChallenge();clearTimeout(resultTimer);clearInput();board.classList.remove('victory');if(!generated)current=index;round=generated?new ChallengeRound(generated,challenge.clock):new Round(levels[index]);shownResult=false;
   $('#result-dialog').close();$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#title').textContent='第 '+(index+1)+' 关';$('#size').textContent=round.level.size+' × '+round.level.size;$('#status').textContent='';board.style.setProperty('--size',round.level.size);board.replaceChildren();
   for(let i=0;i<round.cells.length;i++){const b=document.createElement('button');b.type='button';b.className='cell';b.dataset.index=i;b.tabIndex=i===0?0:-1;const n=round.level.size;const region=round.level.regions[Math.floor(i/n)][i%n];b.dataset.region=region;b.style.setProperty('--cell',colors[region]);b.style.backgroundImage=patterns[region].image;b.style.backgroundSize='16px 16px';const mark=document.createElement('span');mark.className='mark';mark.setAttribute('aria-hidden','true');b.append(mark);board.append(b);}
-  $('#reset').disabled=false;render();
+  if(generated)$('#title').textContent='极限挑战 · 第 '+(challenge.clock.completed+1)+' 关';
+  $('#reset').disabled=transitioning;render();
 }
 function render(){if(!round)return;round.tick();updateClock();const n=round.level.size;$('#remaining').textContent=n-round.found;
   $('#hearts').setAttribute('aria-label','剩余'+round.lives+'滴血');[...$('#hearts').children].forEach((h,i)=>h.classList.toggle('lost',i>=round.lives));
   [...board.children].forEach((b,i)=>{const v=round.cells[i];const className='cell'+(v===1?' found':v===2?' cross':v===3?' wrong':'');if(b.className!==className)b.className=className;b.setAttribute('aria-disabled',String(!round.canEdit(i)));b.setAttribute('aria-label','第'+(Math.floor(i/n)+1)+'行第'+(i%n+1)+'列，区域'+(Number(b.dataset.region)+1)+'，'+patterns[Number(b.dataset.region)].name+'，'+['空格','已找到肥丸，锁定','已打叉','错误位置，锁定'][v]);});
-  if(round.state!=='playing'&&!shownResult&&!$('#play-screen').hidden){shownResult=true;clearInput();resultGuard.reset();const won=round.state==='won';if(won){complete.add(round.level.id);save();}
+  if(round.state!=='playing'&&!shownResult&&!$('#play-screen').hidden){shownResult=true;clearInput();resultGuard.reset();const won=round.state==='won';
+    const celebrationMs=won&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches?920:0;
+    if(won)board.classList.add('victory');
+    const crying=round.failureReason==='lives',resultFeiwan=$('.result-feiwan');
+    resultFeiwan.className='result-feiwan'+(crying?' crying':'');resultFeiwan.setAttribute('aria-label',crying?'委屈哭哭的肥丸':'笑眯眯的肥丸');
+    $('#result-message').hidden=true;
+    if(challenge){
+      challengeBest.record(challenge.clock.completed);showChallengeBest();
+      if(won){const session=challenge;resultTimer=setTimeout(()=>{if(challenge===session)void nextChallenge(session);},celebrationMs);return;}
+      const outcome=challengeResult(challenge.clock.completed,challenge.bestAtStart);
+      if(outcome.kind==='record')feedback.play('record');
+      resultFeiwan.className='result-feiwan '+outcome.face;resultFeiwan.setAttribute('aria-label',outcome.label);
+      $('#result-message').textContent=outcome.copy;$('#result-message').hidden=false;
+      challenge.factory?.cancel();$('#result-symbol').textContent='✦';$('#result-title').textContent=outcome.title;$('#result-copy').textContent='完成了 '+challenge.clock.completed+' 关';$('#result-best').hidden=false;$('#result-best').textContent='本机最佳：'+challengeBest.value+' 关';$('#result-action').textContent='再挑战一次';$('#reset-dialog').close();$('#result-dialog').showModal();return;
+    }
+    $('#result-best').hidden=true;
+    if(won){complete.add(round.level.id);save();}
     $('#result-symbol').textContent=won?'✦':'♡';$('#result-title').textContent=won?'肥丸都找到了！':round.failureReason==='timeout'?'时间到啦':'两滴血用完啦';$('#result-copy').textContent=won?'下一关，继续找肥丸。':'重新开始，再试一次。';$('#result-action').textContent=won?(current===levels.length-1?'再玩本关':'下一关'):'再试一次';const finishedRound=round;
     const showResult=()=>{if(round!==finishedRound||$('#play-screen').hidden)return;$('#reset-dialog').close();resultGuard.reset();$('#result-dialog').showModal();};
-    if(won&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches)resultTimer=setTimeout(showResult,300);else showResult();
+    if(celebrationMs)resultTimer=setTimeout(showResult,celebrationMs);else showResult();
   }
 }
-function showLevels(){if(round?.state!=='playing')shownResult=false;clearTimeout(resultTimer);clearInput();$('#result-dialog').close();$('#reset-dialog').close();$('#play-screen').hidden=true;$('#levels-screen').hidden=false;$('#completion').textContent='已完成 '+levels.filter(l=>complete.has(l.id)).length+' / '+levels.length+' 关';$('#level-list').replaceChildren();
+function showLevels(){if(challenge){leaveChallenge();start(current);}if(round?.state!=='playing')shownResult=false;clearTimeout(resultTimer);clearInput();$('#result-dialog').close();$('#reset-dialog').close();$('#play-screen').hidden=true;$('#levels-screen').hidden=false;$('#completion').textContent='已完成 '+levels.filter(l=>complete.has(l.id)).length+' / '+levels.length+' 关';$('#level-list').replaceChildren();
   const row=document.createElement('div');row.className='level-buttons';
   levels.forEach((l,i)=>{
     const unlocked=isLevelUnlocked(levels,complete,i,gmUnlockAll),done=complete.has(l.id),b=document.createElement('button');
@@ -98,7 +164,7 @@ board.addEventListener('keydown',e=>{const b=e.target.closest('.cell');if(!b||!r
 });
 window.addEventListener('blur',()=>{clearInput();feedback.stop();});document.addEventListener('visibilitychange',()=>{if(document.hidden){clearInput();feedback.stop();}});
 $('#choose').addEventListener('click',showLevels);$('#result-levels').addEventListener('click',showLevels);$('#back').addEventListener('click',()=>{$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#choose').focus();render();});
-$('#reset').addEventListener('click',()=>{clearInput();$('#reset-dialog').showModal();});$('#cancel-reset').addEventListener('click',()=>$('#reset-dialog').close());$('#confirm-reset').addEventListener('click',()=>{$('#reset-dialog').close();start(current);});$('#result-action').addEventListener('click',()=>start(round.state==='won'&&current<levels.length-1?current+1:current));
+$('#reset').addEventListener('click',()=>{clearInput();$('#reset-dialog h2').textContent=challenge?'重新开始挑战？':'重新开始这关？';$('#reset-dialog p').textContent=challenge?'从 5 × 5 开始，时间恢复为 60 秒。':'清空标记，恢复两滴血。';$('#reset-dialog').showModal();});$('#cancel-reset').addEventListener('click',()=>$('#reset-dialog').close());$('#confirm-reset').addEventListener('click',()=>{$('#reset-dialog').close();if(challenge)void beginChallenge();else start(current);});$('#result-action').addEventListener('click',()=>{if(challenge)void beginChallenge();else start(round.state==='won'&&current<levels.length-1?current+1:current);});
 // Capture activation before the existing result button click handlers run.
 const resultDialog=$('#result-dialog');
 resultDialog.addEventListener('pointerdown',e=>{
@@ -137,8 +203,8 @@ function prepareCharacter(){return new Promise((resolve,reject)=>{
   function finish(error){clearTimeout(timeout);character.onload=character.onerror=null;error?reject(error):resolve();}
   character.onload=()=>{if(character.decode)character.decode().then(()=>finish(),finish);else finish();};
   character.onerror=()=>finish(Error('character load'));
-  character.src='./feiwan.webp?v=20260912-6';
+  character.src='./feiwan.webp?v=20260912-7';
 });}
-async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-6',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(0);}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
-$('#retry').addEventListener('click',load);load();
+async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-7',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(latestUnlockedLevel(levels,complete,gmUnlockAll));}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
+$('#retry').addEventListener('click',()=>{if(challenge)void nextChallenge(challenge);else void load();});load();
 installUpdater();
