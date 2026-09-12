@@ -1,6 +1,6 @@
 import {installUpdater} from './updater.js?v=20260913-1';
 import {openLessons} from './lessons.js?v=20260913-8';
-import {beijingDate} from './daily.js?v=20260913-1';
+import {beijingDate,dailyStreak} from './daily.js?v=20260913-10';
 import {ChallengeClock,ChallengeRound,LevelFactory,ChallengeBest,challengeResult} from './challenge.js?v=20260913-1';
 import {Round,TapInput,ResultGuard,isLevelUnlocked,latestUnlockedLevel,needsTutorial,GmTapCounter,toggleGm} from './rules.js?v=20260913-1';
 import {Feedback,BackgroundMusic,CountdownWarning} from './feedback.js?v=20260913-9';
@@ -32,7 +32,7 @@ let resultTimer=null;
 let challenge=null,transitioning=false;
 let daily=null,dailyComplete=new Set();
 try{const saved=JSON.parse(localStorage.getItem('queens-daily-complete-v2')||'[]');if(Array.isArray(saved))dailyComplete=new Set(saved.filter(d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)));}catch{}
-function showDaily(){const date=beijingDate();$('#daily-state').textContent=date+' · '+(dailyComplete.has(date)?'已完成':'未完成');}
+function showDaily(){const date=beijingDate();$('#daily-state').textContent=date+' · '+(dailyComplete.has(date)?'已连续完成 '+dailyStreak(dailyComplete,date)+' 天':'未完成');}
 showDaily();setInterval(showDaily,60000);
 async function beginDaily(date=beijingDate()){
   leaveChallenge();clearTimeout(resultTimer);clearInput();round=null;shownResult=false;

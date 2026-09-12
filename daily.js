@@ -2,6 +2,12 @@ export function beijingDate(now=Date.now()){
   return new Date(now+8*60*60*1000).toISOString().slice(0,10);
 }
 // Version the seed convention so future generator changes can be coordinated.
+export function dailyStreak(completed,date=beijingDate()){
+  let count=0,day=Date.parse(date+'T00:00:00Z');
+  if(!Number.isFinite(day))return 0;
+  while(completed.has(new Date(day).toISOString().slice(0,10))){count++;day-=86400000;}
+  return count;
+}
 export function dateRandom(date){
   let seed=2166136261;
   for(const c of 'feiwan-daily-balanced-v6:'+date)seed=Math.imul(seed^c.charCodeAt(0),16777619)>>>0;
