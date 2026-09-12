@@ -167,7 +167,9 @@ function showLevels(){showDaily();if(challenge||daily){leaveChallenge();start(cu
     const unlocked=isLevelUnlocked(levels,complete,i,gmUnlockAll),done=complete.has(l.id),b=document.createElement('button');
     b.type='button';b.disabled=!unlocked;b.className=(i===current?'current ':'')+(done?'done':'');
     b.textContent=String(i+1).padStart(2,'0');
-    b.setAttribute('aria-label','第 '+(i+1)+' 关，'+(done?'已完成':unlocked?'已解锁':'未解锁'));
+    if(i===current){b.setAttribute('aria-current','true');const tag=document.createElement('span');tag.className='level-current';tag.textContent='当前';tag.setAttribute('aria-hidden','true');b.append(tag);}
+    if(done){const check=document.createElement('span');check.className='level-done';check.textContent='✓';check.setAttribute('aria-hidden','true');b.append(check);}
+    b.setAttribute('aria-label','第 '+(i+1)+' 关，'+(i===current?'当前关卡，':'')+(done?'已完成':unlocked?'已解锁':'未解锁'));
     if(!unlocked)b.title='通关前面的关卡后解锁';
     b.addEventListener('click',()=>start(i));row.append(b);
   });$('#level-list').append(row);$('#back').focus();
