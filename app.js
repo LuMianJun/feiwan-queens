@@ -1,5 +1,5 @@
 import {installUpdater} from './updater.js?v=20260913-1';
-import {openLessons} from './lessons.js?v=20260913-5';
+import {openLessons} from './lessons.js?v=20260913-8';
 import {beijingDate} from './daily.js?v=20260913-1';
 import {ChallengeClock,ChallengeRound,LevelFactory,ChallengeBest,challengeResult} from './challenge.js?v=20260913-1';
 import {Round,TapInput,ResultGuard,isLevelUnlocked,latestUnlockedLevel,needsTutorial,GmTapCounter,toggleGm} from './rules.js?v=20260913-1';
