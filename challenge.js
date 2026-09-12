@@ -1,4 +1,4 @@
-import {Round} from './rules.js?v=20260912-7';
+import {Round} from './rules.js?v=20260913-1';
 
 export class ChallengeClock {
   constructor(now=()=>Date.now()){this.now=now;this.ms=60000;this.started=null;this.completed=0;}
@@ -30,10 +30,10 @@ export class ChallengeBest {
 
 // Run generation outside the UI thread. Termination also cancels stale sessions.
 export class LevelFactory {
-  constructor(){this.worker=new Worker(new URL('./generator-worker.js?v=20260912-7',import.meta.url),{type:'module'});this.pending=new Map();this.id=0;
+  constructor(){this.worker=new Worker(new URL('./generator-worker.js?v=20260913-1',import.meta.url),{type:'module'});this.pending=new Map();this.id=0;
     this.worker.onmessage=({data})=>{const p=this.pending.get(data.id);if(!p)return;clearTimeout(p.timer);this.pending.delete(data.id);data.error?p.resolve({error:data.error}):p.resolve({level:data.level});};
     this.worker.onerror=()=>this.cancel();
   }
-  generate(number){return new Promise(resolve=>{const id=++this.id;const timer=setTimeout(()=>this.cancel(),30000);this.pending.set(id,{resolve,timer});this.worker.postMessage({id,size:challengeSize(number)});});}
+  generate(number,date=null){return new Promise(resolve=>{const id=++this.id;const timer=setTimeout(()=>this.cancel(),30000);this.pending.set(id,{resolve,timer});this.worker.postMessage({id,size:challengeSize(number),date});});}
   cancel(){this.worker.terminate();for(const p of this.pending.values()){clearTimeout(p.timer);p.resolve({error:'generation interrupted'});}this.pending.clear();}
 }

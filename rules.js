@@ -5,6 +5,9 @@ export function isLevelUnlocked(levels,complete,index,unlockAll=false){
   const firstIncomplete=levels.findIndex(level=>!complete.has(level.id));
   return firstIncomplete===-1||index<=firstIncomplete;
 }
+export function needsTutorial({seen=false,completed=0,best=0,gm=false}={}){
+  return !seen&&completed===0&&best===0&&!gm;
+}
 export function latestUnlockedLevel(levels,complete,unlockAll=false){
   for(let i=levels.length-1;i>=0;i--)if(isLevelUnlocked(levels,complete,i,unlockAll))return i;
   return -1;

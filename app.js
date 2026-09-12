@@ -1,7 +1,9 @@
-import {installUpdater} from './updater.js?v=20260912-7';
-import {ChallengeClock,ChallengeRound,LevelFactory,ChallengeBest,challengeResult} from './challenge.js?v=20260912-7';
-import {Round,TapInput,ResultGuard,isLevelUnlocked,latestUnlockedLevel,GmTapCounter,toggleGm} from './rules.js?v=20260912-7';
-import {Feedback,BackgroundMusic} from './feedback.js?v=20260912-7';
+import {installUpdater} from './updater.js?v=20260913-1';
+import {openLessons} from './lessons.js?v=20260913-5';
+import {beijingDate} from './daily.js?v=20260913-1';
+import {ChallengeClock,ChallengeRound,LevelFactory,ChallengeBest,challengeResult} from './challenge.js?v=20260913-1';
+import {Round,TapInput,ResultGuard,isLevelUnlocked,latestUnlockedLevel,needsTutorial,GmTapCounter,toggleGm} from './rules.js?v=20260913-1';
+import {Feedback,BackgroundMusic} from './feedback.js?v=20260913-1';
 const $=s=>document.querySelector(s),board=$('#board');
 // Fixed categorical palette: blue, green, yellow, orange, red, pink,
 // violet, navy, cyan, brown, gray, magenta. Avoid multiple similar greens.
@@ -28,11 +30,30 @@ const patterns=patternDefinitions.map(([name,shape],i)=>{
 });
 let resultTimer=null;
 let challenge=null,transitioning=false;
+let daily=null,dailyComplete=new Set();
+try{const saved=JSON.parse(localStorage.getItem('queens-daily-complete-v2')||'[]');if(Array.isArray(saved))dailyComplete=new Set(saved.filter(d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)));}catch{}
+function showDaily(){const date=beijingDate();$('#daily-state').textContent=date+' · '+(dailyComplete.has(date)?'已完成':'未完成');}
+showDaily();setInterval(showDaily,60000);
+async function beginDaily(date=beijingDate()){
+  leaveChallenge();clearTimeout(resultTimer);clearInput();round=null;shownResult=false;
+  const session={date,factory:null};daily=session;transitioning=true;board.inert=true;
+  $('#result-dialog').close();$('#reset-dialog').close();$('#levels-screen').hidden=true;$('#play-screen').hidden=false;
+  $('#title').textContent='每日挑战 · '+date.slice(5);$('#countdown').hidden=true;$('#status').textContent='';$('#reset').disabled=true;
+  $('#loading').hidden=false;$('#retry').hidden=true;$('#load-message').textContent='正在准备 '+date+' 的挑战…';
+  try{
+    session.factory=new LevelFactory();const result=await session.factory.generate(6,date);
+    if(daily!==session)return;if(result.error)throw Error(result.error);
+    session.level={...result.level,id:'daily-v2-'+date,timeLimitSeconds:0};
+    session.factory.cancel();session.factory=null;transitioning=false;board.inert=false;$('#loading').hidden=true;
+    start(current,session.level);
+  }catch{if(daily!==session)return;session.factory?.cancel();$('#load-message').textContent='今日关卡生成失败，请重试';$('#retry').hidden=false;}
+}
+$('#daily-start').addEventListener('click',()=>void beginDaily());
 let challengeStorage;try{challengeStorage=window.localStorage;}catch{}
 const challengeBest=new ChallengeBest(challengeStorage);
 function showChallengeBest(){$('#challenge-best').textContent='本机最佳：'+challengeBest.value+' 关';}
 showChallengeBest();
-function leaveChallenge(){challenge?.factory?.cancel();challenge=null;transitioning=false;board.inert=false;board.classList.remove('switch-out','switch-in');$('#loading').hidden=true;$('#hearts').hidden=false;$('#challenge-info').hidden=true;document.body.classList.remove('challenge-mode');}
+function leaveChallenge(){daily?.factory?.cancel();daily=null;challenge?.factory?.cancel();challenge=null;transitioning=false;board.inert=false;board.classList.remove('switch-out','switch-in');$('#loading').hidden=true;$('#hearts').hidden=false;$('#challenge-info').hidden=true;document.body.classList.remove('challenge-mode');}
 async function beginChallenge(){
   leaveChallenge();clearTimeout(resultTimer);clearInput();round=null;shownResult=false;
   const session={clock:new ChallengeClock(),factory:null,next:null,bestAtStart:challengeBest.value};challenge=session;
@@ -66,7 +87,7 @@ async function nextChallenge(session){
   }
 }
 $('#challenge-start').addEventListener('click',beginChallenge);
-let levels=[],current=0,round=null,gesture=null,shownResult=false,loading=false,complete=new Set();
+let levels=[],current=0,round=null,gesture=null,shownResult=false,loading=false,complete=new Set(),teachingActive=false;
 let preferences={sound:true,vibration:true,music:true};try{const p=JSON.parse(localStorage.getItem('queens-feedback-v1')||'{}');preferences={sound:p.sound!==false,vibration:p.vibration!==false,music:p.music!==false};}catch{}
 const feedback=new Feedback(preferences);
 const music=new BackgroundMusic({enabled:preferences.music});
@@ -87,7 +108,7 @@ document.addEventListener('pointerdown',e=>{if(!e.target.closest('#help'))gmTaps
 window.addEventListener('blur',()=>gmTaps.reset());
 document.addEventListener('visibilitychange',()=>{if(document.hidden)gmTaps.reset();});
 $('#help').addEventListener('click',()=>{
-  if(challenge||!round||loading||!gmTaps.tap())return;
+  if(challenge||daily||!round||loading||!gmTaps.tap())return;
   gmUnlockAll=toggleGm(levels,complete,gmUnlockAll);
   try{localStorage.setItem('queens-gm-unlock-v1',gmUnlockAll?'on':'off');}catch{}
   save();
@@ -108,10 +129,10 @@ function mark(i){if(transitioning||!round?.canEdit(i))return;round.mark(i);feedb
 const resultGuard=new ResultGuard();
 const taps=new TapInput({single:mark,double:reveal,immediate:true});
 function clearInput(){taps.cancel();gesture=null;}
-function start(index,generated=null){if(!generated&&!isLevelUnlocked(levels,complete,index,gmUnlockAll))return;if(!generated)leaveChallenge();clearTimeout(resultTimer);clearInput();board.classList.remove('victory');if(!generated)current=index;round=generated?new ChallengeRound(generated,challenge.clock):new Round(levels[index]);shownResult=false;
+function start(index,generated=null){if(!generated&&!isLevelUnlocked(levels,complete,index,gmUnlockAll))return;if(!generated)leaveChallenge();clearTimeout(resultTimer);clearInput();board.classList.remove('victory');if(!generated)current=index;round=generated?(daily?new Round(generated):new ChallengeRound(generated,challenge.clock)):new Round(levels[index]);shownResult=false;
   $('#result-dialog').close();$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#title').textContent='第 '+(index+1)+' 关';$('#size').textContent=round.level.size+' × '+round.level.size;$('#status').textContent='';board.style.setProperty('--size',round.level.size);board.replaceChildren();
   for(let i=0;i<round.cells.length;i++){const b=document.createElement('button');b.type='button';b.className='cell';b.dataset.index=i;b.tabIndex=i===0?0:-1;const n=round.level.size;const region=round.level.regions[Math.floor(i/n)][i%n];b.dataset.region=region;b.style.setProperty('--cell',colors[region]);b.style.backgroundImage=patterns[region].image;b.style.backgroundSize='16px 16px';const mark=document.createElement('span');mark.className='mark';mark.setAttribute('aria-hidden','true');b.append(mark);board.append(b);}
-  if(generated)$('#title').textContent='极限挑战 · 第 '+(challenge.clock.completed+1)+' 关';
+  if(generated)$('#title').textContent=daily?'每日挑战 · '+daily.date.slice(5):'极限挑战 · 第 '+(challenge.clock.completed+1)+' 关';
   $('#reset').disabled=transitioning;render();
 }
 function render(){if(!round)return;round.tick();updateClock();const n=round.level.size;$('#remaining').textContent=n-round.found;
@@ -133,13 +154,14 @@ function render(){if(!round)return;round.tick();updateClock();const n=round.leve
       challenge.factory?.cancel();$('#result-symbol').textContent='✦';$('#result-title').textContent=outcome.title;$('#result-copy').textContent='完成了 '+challenge.clock.completed+' 关';$('#result-best').hidden=false;$('#result-best').textContent='本机最佳：'+challengeBest.value+' 关';$('#result-action').textContent='再挑战一次';$('#reset-dialog').close();$('#result-dialog').showModal();return;
     }
     $('#result-best').hidden=true;
-    if(won){complete.add(round.level.id);save();}
+    if(won){if(daily){dailyComplete.add(daily.date);try{localStorage.setItem('queens-daily-complete-v2',JSON.stringify([...dailyComplete]));}catch{}showDaily();}else{complete.add(round.level.id);save();}}
     $('#result-symbol').textContent=won?'✦':'♡';$('#result-title').textContent=won?'肥丸都找到了！':round.failureReason==='timeout'?'时间到啦':'两滴血用完啦';$('#result-copy').textContent=won?'下一关，继续找肥丸。':'重新开始，再试一次。';$('#result-action').textContent=won?(current===levels.length-1?'再玩本关':'下一关'):'再试一次';const finishedRound=round;
+    if(daily){$('#result-title').textContent=won?'今日挑战完成！':'两滴血用完啦';$('#result-copy').textContent=won?daily.date+' · 明天再来找肥丸吧。':'再试一次，今天还是这张棋盘。';$('#result-action').textContent=won?'再玩一次':'再试一次';}
     const showResult=()=>{if(round!==finishedRound||$('#play-screen').hidden)return;$('#reset-dialog').close();resultGuard.reset();$('#result-dialog').showModal();};
     if(celebrationMs)resultTimer=setTimeout(showResult,celebrationMs);else showResult();
   }
 }
-function showLevels(){if(challenge){leaveChallenge();start(current);}if(round?.state!=='playing')shownResult=false;clearTimeout(resultTimer);clearInput();$('#result-dialog').close();$('#reset-dialog').close();$('#play-screen').hidden=true;$('#levels-screen').hidden=false;$('#completion').textContent='已完成 '+levels.filter(l=>complete.has(l.id)).length+' / '+levels.length+' 关';$('#level-list').replaceChildren();
+function showLevels(){showDaily();if(challenge||daily){leaveChallenge();start(current);}if(round?.state!=='playing')shownResult=false;clearTimeout(resultTimer);clearInput();$('#result-dialog').close();$('#reset-dialog').close();$('#play-screen').hidden=true;$('#levels-screen').hidden=false;$('#completion').textContent='已完成 '+levels.filter(l=>complete.has(l.id)).length+' / '+levels.length+' 关';$('#level-list').replaceChildren();
   const row=document.createElement('div');row.className='level-buttons';
   levels.forEach((l,i)=>{
     const unlocked=isLevelUnlocked(levels,complete,i,gmUnlockAll),done=complete.has(l.id),b=document.createElement('button');
@@ -164,7 +186,7 @@ board.addEventListener('keydown',e=>{const b=e.target.closest('.cell');if(!b||!r
 });
 window.addEventListener('blur',()=>{clearInput();feedback.stop();});document.addEventListener('visibilitychange',()=>{if(document.hidden){clearInput();feedback.stop();}});
 $('#choose').addEventListener('click',showLevels);$('#result-levels').addEventListener('click',showLevels);$('#back').addEventListener('click',()=>{$('#levels-screen').hidden=true;$('#play-screen').hidden=false;$('#choose').focus();render();});
-$('#reset').addEventListener('click',()=>{clearInput();$('#reset-dialog h2').textContent=challenge?'重新开始挑战？':'重新开始这关？';$('#reset-dialog p').textContent=challenge?'从 5 × 5 开始，时间恢复为 60 秒。':'清空标记，恢复两滴血。';$('#reset-dialog').showModal();});$('#cancel-reset').addEventListener('click',()=>$('#reset-dialog').close());$('#confirm-reset').addEventListener('click',()=>{$('#reset-dialog').close();if(challenge)void beginChallenge();else start(current);});$('#result-action').addEventListener('click',()=>{if(challenge)void beginChallenge();else start(round.state==='won'&&current<levels.length-1?current+1:current);});
+$('#reset').addEventListener('click',()=>{clearInput();$('#reset-dialog h2').textContent=challenge?'重新开始挑战？':'重新开始这关？';$('#reset-dialog p').textContent=challenge?'从 5 × 5 开始，时间恢复为 60 秒。':'清空标记，恢复两滴血。';$('#reset-dialog').showModal();});$('#cancel-reset').addEventListener('click',()=>$('#reset-dialog').close());$('#confirm-reset').addEventListener('click',()=>{$('#reset-dialog').close();if(challenge)void beginChallenge();else if(daily)start(current,daily.level);else start(current);});$('#result-action').addEventListener('click',()=>{if(challenge)void beginChallenge();else if(daily)start(current,daily.level);else start(round.state==='won'&&current<levels.length-1?current+1:current);});
 // Capture activation before the existing result button click handlers run.
 const resultDialog=$('#result-dialog');
 resultDialog.addEventListener('pointerdown',e=>{
@@ -192,19 +214,41 @@ function updateClock(){
   if(!clock.hidden){const remaining=round.remainingSeconds;clock.textContent='剩余 '+Math.floor(remaining/60)+':'+String(remaining%60).padStart(2,'0');clock.classList.toggle('urgent',remaining<=20);}
 }
 setInterval(()=>{
-  if(!round||round.timeLimitSeconds===0)return;
+  if(teachingActive||!round||round.timeLimitSeconds===0)return;
   round.tick();updateClock();
   if(round.state!=='playing'&&!shownResult)render();
 },200);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&round)render();});
+document.addEventListener('visibilitychange',()=>{if(!teachingActive&&!document.hidden&&round)render();});
 const character=new Image();
 function prepareCharacter(){return new Promise((resolve,reject)=>{
   const timeout=setTimeout(()=>finish(Error('character timeout')),12000);
   function finish(error){clearTimeout(timeout);character.onload=character.onerror=null;error?reject(error):resolve();}
   character.onload=()=>{if(character.decode)character.decode().then(()=>finish(),finish);else finish();};
   character.onerror=()=>finish(Error('character load'));
-  character.src='./feiwan.webp?v=20260912-7';
+  character.src='./feiwan.webp?v=20260913-1';
 });}
-async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260912-7',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;$('#choose').disabled=false;start(latestUnlockedLevel(levels,complete,gmUnlockAll));}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
-$('#retry').addEventListener('click',()=>{if(challenge)void nextChallenge(challenge);else void load();});load();
+async function load(){if(loading)return;loading=true;$('#load-message').textContent='正在准备关卡和肥丸…';$('#retry').hidden=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),12000);try{const [r]=await Promise.all([fetch('./levels.json?v=20260913-1',{signal:controller.signal}),prepareCharacter()]);if(!r.ok)throw Error('load');const pack=await r.json();if(!Array.isArray(pack.levels)||!pack.levels.length)throw Error('pack');for(const l of pack.levels){if(!Number.isInteger(l.size)||l.size<4||l.size>12||l.regions?.length!==l.size||l.regions.some(row=>row.length!==l.size||row.some(v=>!Number.isInteger(v)||v<0||v>=l.size))||l.solution?.length!==l.size||l.solution.some(c=>!Number.isInteger(c)||c<0||c>=l.size))throw Error('level');if(!Number.isInteger(l.timeLimitSeconds??0)||(l.timeLimitSeconds??0)<0)throw Error('time limit');}levels=pack.levels;$('#loading').hidden=true;openInitialLevel();}catch{$('#load-message').textContent='关卡或肥丸未加载完成，请检查网络后重试。';$('#retry').hidden=false;}finally{clearTimeout(timeout);loading=false;}}
+$('#retry').addEventListener('click',()=>{if(challenge)void nextChallenge(challenge);else if(daily)void beginDaily(daily.date);else void load();});load();
+function openInitialLevel(){
+  let seen=false;try{seen=localStorage.getItem('queens-tutorial-seen-v1')==='yes';}catch{}
+  if(needsTutorial({seen,completed:levels.filter(l=>complete.has(l.id)).length+dailyComplete.size,best:challengeBest.value,gm:gmUnlockAll})){
+    $('#tutorial-dialog').showModal();
+  }else{ $('#choose').disabled=false;start(latestUnlockedLevel(levels,complete,gmUnlockAll)); }
+}
+function finishTutorial(){
+  if(!$('#tutorial-dialog').open)return;
+  try{localStorage.setItem('queens-tutorial-seen-v1','yes');}catch{}
+  $('#tutorial-dialog').close();beginLessons(()=>{$('#choose').disabled=false;start(latestUnlockedLevel(levels,complete,gmUnlockAll));});
+}
+function beginLessons(after){
+  if(teachingActive)return;clearInput();clearTimeout(resultTimer);
+  const pausedRound=round,pausedAt=Date.now();teachingActive=true;
+  openLessons({onClose:()=>{
+    if(round===pausedRound&&round?.state==='playing'&&round.deadline!==null)round.deadline+=Date.now()-pausedAt;
+    teachingActive=false;if(after)after();else{$('#learn-reasoning').focus();}
+  }});
+}
+$('#learn-reasoning').addEventListener('click',()=>beginLessons());
+$('#tutorial-start').addEventListener('click',finishTutorial);
+$('#tutorial-dialog').addEventListener('cancel',e=>{e.preventDefault();finishTutorial();});
 installUpdater();
